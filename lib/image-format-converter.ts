@@ -24,6 +24,12 @@ export class ImageFormatConverter {
           return;
         }
 
+        // Clear canvas with white background for JPG/JPEG to avoid transparency issues
+        if (options.format === 'jpeg' || options.format === 'jpg') {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, img.width, img.height);
+        }
+
         ctx.drawImage(img, 0, 0);
 
         let mimeType: string;

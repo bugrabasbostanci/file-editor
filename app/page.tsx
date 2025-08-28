@@ -24,10 +24,8 @@ export default function Home() {
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Image File Processor
-          </h1>
-          <p className="text-gray-600">
+          <h1 className="text-3xl font-bold mb-2">Image File Processor</h1>
+          <p className="text-muted-foreground">
             Remove unwanted text and convert filenames to kebab-case
           </p>
         </div>
@@ -44,6 +42,12 @@ export default function Home() {
                 className="px-4 py-2 text-gray-600 hover:text-gray-900 border-l transition-colors"
               >
                 Format Converter
+              </Link>
+              <Link 
+                href="/image-resizer" 
+                className="px-4 py-2 text-gray-600 hover:text-gray-900 border-l transition-colors"
+              >
+                Image Resizer
               </Link>
             </div>
           </div>

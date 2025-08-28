@@ -4,27 +4,30 @@ import { useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
-import { ImageFormatConverter, type SupportedFormat, type ConversionOptions } from '@/lib/image-format-converter'
-import { Download, Upload, Image as ImageIcon, X } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ImageResizer, type ResizeOptions } from '@/lib/image-resizer'
+import { Download, Upload, Image as ImageIcon, X, Settings } from 'lucide-react'
 import { saveAs } from 'file-saver'
 
-export function ImageFormatConverterComponent() {
+export function ImageResizerComponent() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null)
-  const [targetFormat, setTargetFormat] = useState<SupportedFormat>('png')
-  const [quality, setQuality] = useState<number>(90)
-  const [isConverting, setIsConverting] = useState(false)
+  const [resizedBlob, setResizedBlob] = useState<Blob | null>(null)
+  const [isResizing, setIsResizing] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [resizeWidth, setResizeWidth] = useState<string>('')
+  const [resizeHeight, setResizeHeight] = useState<string>('')
+  const [maintainAspectRatio, setMaintainAspectRatio] = useState<boolean>(true)
+  const [quality, setQuality] = useState<number>(90)
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null)
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      if (ImageFormatConverter.isSupported(file)) {
+      if (ImageResizer.isSupported(file)) {
         setSelectedFile(file)
-        setConvertedBlob(null)
+        setResizedBlob(null)
         
         // Create preview URL and get dimensions
         const url = URL.createObjectURL(file)
@@ -34,6 +37,9 @@ export function ImageFormatConverterComponent() {
         const img = new Image()
         img.onload = () => {
           setOriginalDimensions({ width: img.width, height: img.height })
+          // Reset resize inputs
+          setResizeWidth('')
+          setResizeHeight('')
           URL.revokeObjectURL(img.src)
         }
         img.src = url
@@ -43,43 +49,53 @@ export function ImageFormatConverterComponent() {
     }
   }, [])
 
-  const handleConvert = useCallback(async () => {
+  const handleResize = useCallback(async () => {
     if (!selectedFile) return
 
-    setIsConverting(true)
+    setIsResizing(true)
     try {
-      const options: ConversionOptions = {
-        format: targetFormat,
-        quality: (targetFormat === 'jpeg' || targetFormat === 'jpg' || targetFormat === 'webp') 
+      const originalFormat = ImageResizer.getFormatFromFile(selectedFile);
+      const options: ResizeOptions = {
+        width: resizeWidth ? parseInt(resizeWidth) : undefined,
+        height: resizeHeight ? parseInt(resizeHeight) : undefined,
+        maintainAspectRatio,
+        format: originalFormat || 'png',
+        quality: (originalFormat === 'jpeg' || originalFormat === 'webp') 
           ? quality / 100 
           : undefined
       }
 
-      const blob = await ImageFormatConverter.convertImage(selectedFile, options)
-      setConvertedBlob(blob)
+      const blob = await ImageResizer.resizeImage(selectedFile, options)
+      setResizedBlob(blob)
     } catch (error) {
-      console.error('Conversion failed:', error)
-      alert('Conversion failed.')
+      console.error('Resize failed:', error)
+      alert('Resize operation failed.')
     } finally {
-      setIsConverting(false)
+      setIsResizing(false)
     }
-  }, [selectedFile, targetFormat, quality])
+  }, [selectedFile, resizeWidth, resizeHeight, maintainAspectRatio, quality])
 
   const handleDownload = useCallback(() => {
-    if (!convertedBlob || !selectedFile) return
+    if (!resizedBlob || !selectedFile) return
 
     const originalName = selectedFile.name.split('.')[0]
-    const extension = ImageFormatConverter.getFileExtension(targetFormat)
-    const fileName = `${originalName}.${extension}`
+    const originalFormat = ImageResizer.getFormatFromFile(selectedFile) || 'png'
+    const extension = ImageResizer.getFileExtension(originalFormat)
+    const dimensionSuffix = (resizeWidth || resizeHeight) ? 
+      `_${resizeWidth || 'auto'}x${resizeHeight || 'auto'}` : '_resized'
+    const fileName = `${originalName}${dimensionSuffix}.${extension}`
     
-    saveAs(convertedBlob, fileName)
-  }, [convertedBlob, selectedFile, targetFormat])
+    saveAs(resizedBlob, fileName)
+  }, [resizedBlob, selectedFile, resizeWidth, resizeHeight])
 
   const handleClear = useCallback(() => {
     setSelectedFile(null)
-    setConvertedBlob(null)
+    setResizedBlob(null)
     setPreviewUrl('')
     setOriginalDimensions(null)
+    setResizeWidth('')
+    setResizeHeight('')
+    setMaintainAspectRatio(true)
     
     // Clear file input
     const fileInput = document.getElementById('file-upload') as HTMLInputElement
@@ -97,9 +113,9 @@ export function ImageFormatConverterComponent() {
     const files = event.dataTransfer.files
     if (files.length > 0) {
       const file = files[0]
-      if (ImageFormatConverter.isSupported(file)) {
+      if (ImageResizer.isSupported(file)) {
         setSelectedFile(file)
-        setConvertedBlob(null)
+        setResizedBlob(null)
         
         const url = URL.createObjectURL(file)
         setPreviewUrl(url)
@@ -108,6 +124,9 @@ export function ImageFormatConverterComponent() {
         const img = new Image()
         img.onload = () => {
           setOriginalDimensions({ width: img.width, height: img.height })
+          // Reset resize inputs
+          setResizeWidth('')
+          setResizeHeight('')
         }
         img.src = url
       } else {
@@ -115,6 +134,32 @@ export function ImageFormatConverterComponent() {
       }
     }
   }, [])
+
+  // Handle width change with aspect ratio calculation
+  const handleWidthChange = useCallback((value: string) => {
+    setResizeWidth(value)
+    if (maintainAspectRatio && value && originalDimensions) {
+      const width = parseInt(value)
+      if (!isNaN(width)) {
+        const aspectRatio = originalDimensions.width / originalDimensions.height
+        const newHeight = Math.round(width / aspectRatio)
+        setResizeHeight(newHeight.toString())
+      }
+    }
+  }, [maintainAspectRatio, originalDimensions])
+
+  // Handle height change with aspect ratio calculation
+  const handleHeightChange = useCallback((value: string) => {
+    setResizeHeight(value)
+    if (maintainAspectRatio && value && originalDimensions) {
+      const height = parseInt(value)
+      if (!isNaN(height)) {
+        const aspectRatio = originalDimensions.width / originalDimensions.height
+        const newWidth = Math.round(height * aspectRatio)
+        setResizeWidth(newWidth.toString())
+      }
+    }
+  }, [maintainAspectRatio, originalDimensions])
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -128,7 +173,7 @@ export function ImageFormatConverterComponent() {
               Upload File
             </CardTitle>
             <CardDescription>
-              Select the image you want to convert
+              Select the image you want to resize
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -162,7 +207,7 @@ export function ImageFormatConverterComponent() {
                   Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Format: {ImageFormatConverter.getFormatFromFile(selectedFile)?.toUpperCase()}
+                  Format: {ImageResizer.getFormatFromFile(selectedFile)?.toUpperCase()}
                 </p>
                 {originalDimensions && (
                   <p className="text-sm text-muted-foreground">
@@ -174,42 +219,82 @@ export function ImageFormatConverterComponent() {
           </CardContent>
         </Card>
 
-        {/* Conversion Settings */}
+        {/* Resize Settings */}
         <Card>
           <CardHeader>
-            <CardTitle>Conversion Settings</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              Resize Settings
+            </CardTitle>
             <CardDescription>
-              Choose target format and quality settings
+              Set new dimensions and output settings
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div>
-              <Label className="text-base font-medium">Target Format</Label>
-              <RadioGroup
-                value={targetFormat}
-                onValueChange={(value) => setTargetFormat(value as SupportedFormat)}
-                className="mt-2"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="png" id="png" />
-                  <Label htmlFor="png">PNG (Lossless)</Label>
+            {/* Original Dimensions Display */}
+            {originalDimensions && (
+              <div>
+                <Label className="text-base font-medium">Original Size</Label>
+                <p className="text-sm text-muted-foreground">
+                  {originalDimensions.width} x {originalDimensions.height} px
+                </p>
+              </div>
+            )}
+
+            {/* Dimension Inputs */}
+            <div className="space-y-4">
+              <Label className="text-base font-medium">New Dimensions</Label>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="width" className="text-sm">Width (px)</Label>
+                    <Input
+                      id="width"
+                      type="number"
+                      min="1"
+                      max="4000"
+                      value={resizeWidth}
+                      onChange={(e) => handleWidthChange(e.target.value)}
+                      placeholder={originalDimensions?.width.toString() || "Width"}
+                      disabled={!selectedFile}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="height" className="text-sm">Height (px)</Label>
+                    <Input
+                      id="height"
+                      type="number"
+                      min="1"
+                      max="4000"
+                      value={resizeHeight}
+                      onChange={(e) => handleHeightChange(e.target.value)}
+                      placeholder={originalDimensions?.height.toString() || "Height"}
+                      disabled={!selectedFile}
+                    />
+                  </div>
                 </div>
+                
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="jpeg" id="jpeg" />
-                  <Label htmlFor="jpeg">JPEG (Compressed)</Label>
+                  <Checkbox
+                    id="maintain-aspect"
+                    checked={maintainAspectRatio}
+                    onCheckedChange={(checked) => setMaintainAspectRatio(checked === true)}
+                  />
+                  <Label htmlFor="maintain-aspect" className="text-sm">
+                    Maintain aspect ratio
+                  </Label>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="jpg" id="jpg" />
-                  <Label htmlFor="jpg">JPG (Compressed)</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="webp" id="webp" />
-                  <Label htmlFor="webp">WebP (Modern)</Label>
-                </div>
-              </RadioGroup>
+                
+                {(resizeWidth || resizeHeight) && (
+                  <p className="text-xs text-muted-foreground">
+                    New size: {resizeWidth || 'auto'} x {resizeHeight || 'auto'} px
+                  </p>
+                )}
+              </div>
             </div>
 
-            {(targetFormat === 'jpeg' || targetFormat === 'jpg' || targetFormat === 'webp') && (
+            {/* Quality Slider - only show for JPEG/WebP files */}
+            {selectedFile && (ImageResizer.getFormatFromFile(selectedFile) === 'jpeg' || ImageResizer.getFormatFromFile(selectedFile) === 'webp') && (
               <div>
                 <Label className="text-base font-medium">
                   Quality: {quality}%
@@ -229,18 +314,18 @@ export function ImageFormatConverterComponent() {
             )}
 
             <Button
-              onClick={handleConvert}
-              disabled={!selectedFile || isConverting}
+              onClick={handleResize}
+              disabled={!selectedFile || isResizing || (!resizeWidth && !resizeHeight)}
               className="w-full"
             >
-              {isConverting ? 'Converting...' : 'Convert'}
+              {isResizing ? 'Resizing...' : 'Resize'}
             </Button>
           </CardContent>
         </Card>
       </div>
 
       {/* Preview and Download */}
-      {(previewUrl || convertedBlob) && (
+      {(previewUrl || resizedBlob) && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
@@ -264,31 +349,39 @@ export function ImageFormatConverterComponent() {
               {previewUrl && (
                 <div>
                   <Label className="text-sm font-medium">Original</Label>
-                  <div className="mt-2 border rounded-lg overflow-hidden">
+                  {originalDimensions && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {originalDimensions.width} x {originalDimensions.height} px
+                    </p>
+                  )}
+                  <div className="border rounded-lg overflow-hidden">
                     <img
                       src={previewUrl}
-                      alt="Orijinal"
+                      alt="Original"
                       className="w-full h-64 object-contain bg-gray-50"
                     />
                   </div>
                 </div>
               )}
 
-              {convertedBlob && (
+              {resizedBlob && selectedFile && (
                 <div>
                   <Label className="text-sm font-medium">
-                    Converted ({targetFormat.toUpperCase()})
+                    Resized ({(ImageResizer.getFormatFromFile(selectedFile) || 'png').toUpperCase()})
                   </Label>
-                  <div className="mt-2 border rounded-lg overflow-hidden">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {resizeWidth || 'auto'} x {resizeHeight || 'auto'} px
+                  </p>
+                  <div className="border rounded-lg overflow-hidden">
                     <img
-                      src={URL.createObjectURL(convertedBlob)}
-                      alt="Converted"
+                      src={URL.createObjectURL(resizedBlob)}
+                      alt="Resized"
                       className="w-full h-64 object-contain bg-gray-50"
                     />
                   </div>
                   <div className="mt-2 flex items-center justify-between">
                     <p className="text-sm text-muted-foreground">
-                      Size: {(convertedBlob.size / 1024 / 1024).toFixed(2)} MB
+                      Size: {(resizedBlob.size / 1024 / 1024).toFixed(2)} MB
                     </p>
                     <Button onClick={handleDownload} size="sm">
                       <Download className="w-4 h-4 mr-2" />
