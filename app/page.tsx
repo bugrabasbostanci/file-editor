@@ -1,9 +1,10 @@
-'use client';
+"use client";
 
-import { FileUpload } from '@/components/file-upload';
-import { ProcessingPanel } from '@/components/processing-panel';
-import { PreviewPanel } from '@/components/preview-panel';
-import { useFileProcessing } from '@/hooks/use-file-processing';
+import { FileUpload } from "@/components/file-upload";
+import { ProcessingPanel } from "@/components/processing-panel";
+import { PreviewPanel } from "@/components/preview-panel";
+import { useFileProcessing } from "@/hooks/use-file-processing";
+import Link from "next/link";
 
 export default function Home() {
   const {
@@ -15,7 +16,7 @@ export default function Home() {
     clearFiles,
     processFiles,
     downloadFile,
-    downloadAllAsZip
+    downloadAllAsZip,
   } = useFileProcessing();
 
   return (
@@ -31,15 +32,29 @@ export default function Home() {
           </p>
         </div>
 
+        {/* Navigation */}
+        <div className="flex justify-center mb-8">
+          <div className="bg-white rounded-lg shadow-sm border">
+            <div className="flex">
+              <span className="px-4 py-2 bg-blue-50 text-blue-900 font-medium">
+                File Processor
+              </span>
+              <Link 
+                href="/format-converter" 
+                className="px-4 py-2 text-gray-600 hover:text-gray-900 border-l transition-colors"
+              >
+                Format Converter
+              </Link>
+            </div>
+          </div>
+        </div>
+
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Upload & Settings */}
           <div className="lg:col-span-1 space-y-6">
-            <FileUpload 
-              onFilesSelected={addFiles}
-              disabled={isProcessing}
-            />
-            
+            <FileUpload onFilesSelected={addFiles} disabled={isProcessing} />
+
             <ProcessingPanel
               onProcess={processFiles}
               disabled={isProcessing}
@@ -67,7 +82,9 @@ export default function Home() {
               <span>Total: {processingStats.totalFiles}</span>
               <span>Processed: {processingStats.processedFiles}</span>
               {processingStats.errorCount > 0 && (
-                <span className="text-red-600">Errors: {processingStats.errorCount}</span>
+                <span className="text-red-600">
+                  Errors: {processingStats.errorCount}
+                </span>
               )}
             </div>
           </div>
