@@ -10,41 +10,63 @@ import { ImageFormatConverter, type SupportedFormat, type ConversionOptions } fr
 import { Download, Upload, Image as ImageIcon, X } from 'lucide-react'
 import { saveAs } from 'file-saver'
 
+interface FileWithPreview {
+  file: File
+  previewUrl: string
+  originalDimensions: { width: number; height: number } | null
+  convertedBlob: Blob | null
+}
+
 export function ImageFormatConverterComponent() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<FileWithPreview[]>([])
   const [targetFormat, setTargetFormat] = useState<SupportedFormat>('png')
   const [quality, setQuality] = useState<number>(90)
   const [isConverting, setIsConverting] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string>('')
-  const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null)
+  const MAX_FILES = 100
 
-  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file) {
+  const processFiles = useCallback((files: File[]) => {
+    const newFiles: FileWithPreview[] = []
+    const remainingSlots = MAX_FILES - selectedFiles.length
+    const filesToProcess = files.slice(0, remainingSlots)
+    
+    if (files.length > remainingSlots) {
+      alert(`En fazla ${MAX_FILES} dosya yükleyebilirsiniz. İlk ${remainingSlots} dosya seçildi.`)
+    }
+    
+    filesToProcess.forEach(file => {
       if (ImageFormatConverter.isSupported(file)) {
-        setSelectedFile(file)
-        setConvertedBlob(null)
-        
-        // Create preview URL and get dimensions
         const url = URL.createObjectURL(file)
-        setPreviewUrl(url)
+        const fileWithPreview: FileWithPreview = {
+          file,
+          previewUrl: url,
+          originalDimensions: null,
+          convertedBlob: null
+        }
         
         // Get original image dimensions
         const img = new Image()
         img.onload = () => {
-          setOriginalDimensions({ width: img.width, height: img.height })
-          URL.revokeObjectURL(img.src)
+          fileWithPreview.originalDimensions = { width: img.width, height: img.height }
+          setSelectedFiles(prev => [...prev])
         }
         img.src = url
+        
+        newFiles.push(fileWithPreview)
       } else {
-        alert('Unsupported file format. Please select a PNG, JPEG, JPG or WebP file.')
+        alert(`Desteklenmeyen dosya formatı: ${file.name}. PNG, JPEG, JPG veya WebP dosyası seçin.`)
       }
-    }
-  }, [])
+    })
+    
+    setSelectedFiles(prev => [...prev, ...newFiles])
+  }, [selectedFiles.length])
+
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    processFiles(files)
+  }, [processFiles])
 
   const handleConvert = useCallback(async () => {
-    if (!selectedFile) return
+    if (selectedFiles.length === 0) return
 
     setIsConverting(true)
     try {
@@ -55,37 +77,67 @@ export function ImageFormatConverterComponent() {
           : undefined
       }
 
-      const blob = await ImageFormatConverter.convertImage(selectedFile, options)
-      setConvertedBlob(blob)
+      const updatedFiles: FileWithPreview[] = []
+      
+      for (const fileWithPreview of selectedFiles) {
+        try {
+          const blob = await ImageFormatConverter.convertImage(fileWithPreview.file, options)
+          updatedFiles.push({ ...fileWithPreview, convertedBlob: blob })
+        } catch (error) {
+          console.error(`Conversion failed for ${fileWithPreview.file.name}:`, error)
+          updatedFiles.push(fileWithPreview)
+        }
+      }
+      
+      setSelectedFiles(updatedFiles)
     } catch (error) {
       console.error('Conversion failed:', error)
-      alert('Conversion failed.')
+      alert('Dönüştürme işlemi başarısız oldu.')
     } finally {
       setIsConverting(false)
     }
-  }, [selectedFile, targetFormat, quality])
+  }, [selectedFiles, targetFormat, quality])
 
-  const handleDownload = useCallback(() => {
-    if (!convertedBlob || !selectedFile) return
+  const handleDownload = useCallback((fileWithPreview: FileWithPreview) => {
+    if (!fileWithPreview.convertedBlob) return
 
-    const originalName = selectedFile.name.split('.')[0]
+    const originalName = fileWithPreview.file.name.split('.')[0]
     const extension = ImageFormatConverter.getFileExtension(targetFormat)
     const fileName = `${originalName}.${extension}`
     
-    saveAs(convertedBlob, fileName)
-  }, [convertedBlob, selectedFile, targetFormat])
+    saveAs(fileWithPreview.convertedBlob, fileName)
+  }, [targetFormat])
+
+  const handleDownloadAll = useCallback(async () => {
+    const convertedFiles = selectedFiles.filter(f => f.convertedBlob)
+    if (convertedFiles.length === 0) return
+
+    for (let i = 0; i < convertedFiles.length; i++) {
+      handleDownload(convertedFiles[i])
+      // Tarayıcının indirmeleri engellemesini önlemek için gecikme
+      if (i < convertedFiles.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+    }
+  }, [selectedFiles, handleDownload])
 
   const handleClear = useCallback(() => {
-    setSelectedFile(null)
-    setConvertedBlob(null)
-    setPreviewUrl('')
-    setOriginalDimensions(null)
+    selectedFiles.forEach(f => URL.revokeObjectURL(f.previewUrl))
+    setSelectedFiles([])
     
     // Clear file input
     const fileInput = document.getElementById('file-upload') as HTMLInputElement
     if (fileInput) {
       fileInput.value = ''
     }
+  }, [selectedFiles])
+
+  const handleRemoveFile = useCallback((index: number) => {
+    setSelectedFiles(prev => {
+      const fileToRemove = prev[index]
+      URL.revokeObjectURL(fileToRemove.previewUrl)
+      return prev.filter((_, i) => i !== index)
+    })
   }, [])
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -94,27 +146,9 @@ export function ImageFormatConverterComponent() {
 
   const handleDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
-    const files = event.dataTransfer.files
-    if (files.length > 0) {
-      const file = files[0]
-      if (ImageFormatConverter.isSupported(file)) {
-        setSelectedFile(file)
-        setConvertedBlob(null)
-        
-        const url = URL.createObjectURL(file)
-        setPreviewUrl(url)
-        
-        // Get original image dimensions
-        const img = new Image()
-        img.onload = () => {
-          setOriginalDimensions({ width: img.width, height: img.height })
-        }
-        img.src = url
-      } else {
-        alert('Unsupported file format. Please select a PNG, JPEG, JPG or WebP file.')
-      }
-    }
-  }, [])
+    const files = Array.from(event.dataTransfer.files)
+    processFiles(files)
+  }, [processFiles])
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -143,32 +177,46 @@ export function ImageFormatConverterComponent() {
                 onChange={handleFileSelect}
                 className="hidden"
                 id="file-upload"
+                multiple
               />
               <label htmlFor="file-upload" className="cursor-pointer">
                 <ImageIcon className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground mb-2">
-                  Drag & drop your file here, or click to select
+                  Birden fazla dosya sürükleyip bırakın veya seçmek için tıklayın
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  PNG, JPEG, JPG, WebP
+                  PNG, JPEG, JPG, WebP (Maksimum {MAX_FILES} dosya)
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Seçili dosya: {selectedFiles.length}/{MAX_FILES}
                 </p>
               </label>
             </div>
 
-            {selectedFile && (
-              <div className="mt-4 p-4 bg-muted rounded-lg">
-                <p className="font-medium">{selectedFile.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Format: {ImageFormatConverter.getFormatFromFile(selectedFile)?.toUpperCase()}
-                </p>
-                {originalDimensions && (
-                  <p className="text-sm text-muted-foreground">
-                    Dimensions: {originalDimensions.width} x {originalDimensions.height} px
-                  </p>
-                )}
+            {selectedFiles.length > 0 && (
+              <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
+                {selectedFiles.map((fileWithPreview, index) => (
+                  <div key={index} className="p-3 bg-muted rounded-lg flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{fileWithPreview.file.name}</p>
+                      <div className="flex gap-4 text-xs text-muted-foreground">
+                        <span>Size: {(fileWithPreview.file.size / 1024 / 1024).toFixed(2)} MB</span>
+                        <span>Format: {ImageFormatConverter.getFormatFromFile(fileWithPreview.file)?.toUpperCase()}</span>
+                        {fileWithPreview.originalDimensions && (
+                          <span>{fileWithPreview.originalDimensions.width} x {fileWithPreview.originalDimensions.height} px</span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveFile(index)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 ml-2"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
@@ -228,25 +276,37 @@ export function ImageFormatConverterComponent() {
               </div>
             )}
 
-            <Button
-              onClick={handleConvert}
-              disabled={!selectedFile || isConverting}
-              className="w-full"
-            >
-              {isConverting ? 'Converting...' : 'Convert'}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                onClick={handleConvert}
+                disabled={selectedFiles.length === 0 || isConverting}
+                className="w-full"
+              >
+                {isConverting ? 'Dönüştürülüyor...' : `${selectedFiles.length} Dosyayı Dönüştür`}
+              </Button>
+              {selectedFiles.some(f => f.convertedBlob) && (
+                <Button
+                  onClick={handleDownloadAll}
+                  variant="outline"
+                  className="w-full"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Tümünü İndir
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Preview and Download */}
-      {(previewUrl || convertedBlob) && (
+      {selectedFiles.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-5 h-5" />
-                Preview
+                Önizleme ({selectedFiles.length} dosya)
               </div>
               <Button
                 variant="outline"
@@ -255,48 +315,66 @@ export function ImageFormatConverterComponent() {
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
               >
                 <X className="w-4 h-4 mr-1" />
-                Clear
+                Temizle
               </Button>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-2 gap-4">
-              {previewUrl && (
-                <div>
-                  <Label className="text-sm font-medium">Original</Label>
-                  <div className="mt-2 border rounded-lg overflow-hidden">
-                    <img
-                      src={previewUrl}
-                      alt="Orijinal"
-                      className="w-full h-64 object-contain bg-gray-50"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {convertedBlob && (
-                <div>
-                  <Label className="text-sm font-medium">
-                    Converted ({targetFormat.toUpperCase()})
-                  </Label>
-                  <div className="mt-2 border rounded-lg overflow-hidden">
-                    <img
-                      src={URL.createObjectURL(convertedBlob)}
-                      alt="Converted"
-                      className="w-full h-64 object-contain bg-gray-50"
-                    />
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                      Size: {(convertedBlob.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                    <Button onClick={handleDownload} size="sm">
-                      <Download className="w-4 h-4 mr-2" />
-                      Download
+            <div className="grid gap-6">
+              {selectedFiles.map((fileWithPreview, index) => (
+                <div key={index} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium truncate">{fileWithPreview.file.name}</h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveFile(index)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4" />
                     </Button>
                   </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium">Orijinal</Label>
+                      <div className="mt-2 border rounded-lg overflow-hidden">
+                        <img
+                          src={fileWithPreview.previewUrl}
+                          alt="Orijinal"
+                          className="w-full h-48 object-contain bg-gray-50"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {(fileWithPreview.file.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                    
+                    {fileWithPreview.convertedBlob && (
+                      <div>
+                        <Label className="text-sm font-medium">
+                          Dönüştürülmüş ({targetFormat.toUpperCase()})
+                        </Label>
+                        <div className="mt-2 border rounded-lg overflow-hidden">
+                          <img
+                            src={URL.createObjectURL(fileWithPreview.convertedBlob)}
+                            alt="Dönüştürülmüş"
+                            className="w-full h-48 object-contain bg-gray-50"
+                          />
+                        </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">
+                            {(fileWithPreview.convertedBlob.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                          <Button onClick={() => handleDownload(fileWithPreview)} size="sm">
+                            <Download className="w-4 h-4 mr-2" />
+                            İndir
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           </CardContent>
         </Card>
