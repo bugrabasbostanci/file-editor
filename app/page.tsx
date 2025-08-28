@@ -1,5 +1,7 @@
 "use client";
 
+export const runtime = 'edge';
+
 import { FileUpload } from "@/components/file-upload";
 import { ProcessingPanel } from "@/components/processing-panel";
 import { PreviewPanel } from "@/components/preview-panel";

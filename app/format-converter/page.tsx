@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { ImageFormatConverterComponent } from '@/components/image-format-converter'
 import Link from "next/link";
 

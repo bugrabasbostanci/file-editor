@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { ImageResizerComponent } from "@/components/image-resizer";
 import Link from "next/link";
 
